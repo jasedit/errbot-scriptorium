@@ -110,6 +110,21 @@ class Scriptorium(BotPlugin):
             return match.group('dir')
         return None
 
+    def _build_paper(self, path):
+        """Builds paper using a fairly rigid command order, to mitigate security concerns for running arbitrary code."""
+        self.log.debug("Attempting to build paper in {0}".format(path))
+        paper_path = os.path.join(path, 'paper.mmd')
+        tex_path = os.path.join(path, 'paper.tex')
+        if not os.path.exists(paper_path):
+            return None
+
+        try:
+            subprocess.check_output([os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'bin', 'make_paper.sh'), path], universal_newlines=True, cwd=path)
+            return os.path.join(path, 'paper.pdf')
+        except subprocess.CalledProcessError as e:
+          self.log.error("Paper making failed: {0}".format(e.output))
+          return False
+
     @botcmd
     def paper_add(self, mess, args):
         """Adds a paper to the repository of papers."""
@@ -145,7 +160,21 @@ class Scriptorium(BotPlugin):
     @botcmd
     def paper_make(self, mess, args):
         """Attempts to make a paper, and returns the PDF if successful."""
-        pass
+        self._check_requirements()
+
+        paper_dir = os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'papers', args)
+        if self._is_repo(paper_dir):
+            yield "Attempting to make {0}".format(args)
+            pdf_path = self._build_paper(paper_dir)
+            if pdf_path:
+              # with open(pdf_path, 'rb') as fp:
+                  # file, contenttype = urllib3.filepost.encode_multipart_formdata({'file': ('paper.pdf', fp.read(), 'application/pdf')})
+              data = {'filename': 'paper.pdf', 'file': open(pdf_path, 'rb'), 'channels': mess.frm.channelid}
+              self._bot.api_call('files.upload', data)
+            else:
+              yield "Failed to make {0}".format(args)
+        else:
+            return "{0} is not a valid paper.".format(args)
 
     @botcmd
     def template_add(self, mess, args):
