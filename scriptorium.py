@@ -39,9 +39,7 @@ class Scriptorium(BotPlugin):
         for ii in Scriptorium.REQUIRED_PACKAGES:
             location = utils.which(ii)
 
-            if location is not None:
-                self.config[ii] = location
-            else:
+            if location is None:
                 self.log.error('Could not find executable {0}'.format(ii))
                 status = False
 
