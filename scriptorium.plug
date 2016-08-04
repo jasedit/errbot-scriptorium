@@ -1,0 +1,9 @@
+[Core]
+Name = Scriptorium
+Module = scriptorium
+
+[Documentation]
+Description = Plugin for allowing users to build papers using the Scriptorium system.
+
+[Python]
+Version = 3
