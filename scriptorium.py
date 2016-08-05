@@ -129,8 +129,7 @@ class Scriptorium(BotPlugin):
 
         key = self.get('users', {}).get(user, {}).get('key', None)
         try:
-            self._run_git_remote_cmd(['git', 'fetch'])
-            subprocess.check_call()
+            self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
             cmd = ['git', 'checkout']
 
             if force:
