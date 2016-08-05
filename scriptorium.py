@@ -5,9 +5,10 @@
 from errbot import BotPlugin, botcmd
 from errbot import utils
 from errbot.templating import tenv
+from Crypto.PublicKey import RSA
+import tempfile
 import subprocess
 import os
-import sys
 import re
 
 CONFIG_TEMPLATE = {
@@ -15,15 +16,8 @@ CONFIG_TEMPLATE = {
   'MMD': '/usr/local/bin/multimarkdown'
 }
 
-class PaperInfo:
-  """Class holding information about a paper which can be built."""
-  def __init__(self):
-    self.location = None
-    self.users = []
-    self.use_biber = True
-
 class Scriptorium(BotPlugin):
-    REQUIRED_PACKAGES = ['multimarkdown', 'pdflatex', 'latexpand']
+    REQUIRED_PACKAGES = ['multimarkdown', 'pdflatex', 'latexpand', 'biber']
     def _check_requirements(self):
         """Checks that the proper binaries and folders exist for operation."""
         if not os.path.isdir(self.config['SCRIPTORIUM_LOCATION']):
@@ -53,6 +47,26 @@ class Scriptorium(BotPlugin):
       """Tests if a given path is a folder containing a git repository."""
       return os.path.isdir(path) and os.path.isdir(os.path.join(path, '.git'))
 
+    def _write_key(self, key):
+        """Writes the key to a temporary file, returns path if successful."""
+        fd, path = tempfile.mkstemp()
+        with open(fd, 'w') as fdkey:
+            fdkey.write(key.exportKey('PEM').decode('ascii'))
+
+        return path
+
+    def _run_git_remote_cmd(self, cmd, cwd=None, key=None):
+        """Executes a git command with an SSH key set."""
+        path = self._write_key(key) if key else ''
+        env = {'GIT_SSH_COMMAND': 'ssh -i {0}'.format(path)} if key else None
+        try:
+            subprocess.check_output(cmd, cwd=cwd, env=env)
+        except subprocess.CalledProcessError as e:
+            raise e
+        finally:
+            if path:
+                os.remove(path)
+
     def _get_branch_name(self, path):
         if not self._is_repo(path):
             return ""
@@ -71,25 +85,37 @@ class Scriptorium(BotPlugin):
         except:
             return False
 
-    def _clone_repo(self, url, path):
+    def _test_remote_access(self, path, user = None):
+        try:
+            key = self.get('users', {}).get(user, {}).get('key', None)
+            self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
+            return True
+        except subprocess.CalledProcessError as e:
+            return False
+
+    def _clone_repo(self, url, path, user = None):
         """Clones a git repository from the url to a folder inside the path given."""
         try:
             self.log.debug("Cloning {0} to {1}".format(url, path))
-            cmd = ['git', 'clone', url, path]
-            subprocess.check_call(cmd, cwd=path)
+            cmd = ['git', 'clone', url]
+            key = self.get('users', {}).get(user, {}).get('key', None)
+            self._run_git_remote_cmd(cmd, cwd=path, key=key)
             return True
         except subprocess.CalledProcessError as e:
           cmd_str = ' '.join(cmd)
           self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
           return False
 
-    def _update_repo(self, path, force=False, commit=None):
+    def _update_repo(self, path, force=False, commit=None, user=None):
         """Updates a repository to a particular version, or the latest version if commit is None."""
 
         if not self._is_repo(path):
             return False
+
+        key = self.get('users', {}).get(user, {}).get('key', None)
         try:
-            subprocess.check_call(['git', 'fetch'])
+            self._run_git_remote_cmd(['git', 'fetch'])
+            subprocess.check_call()
             cmd = ['git', 'checkout']
 
             if force:
@@ -97,7 +123,7 @@ class Scriptorium(BotPlugin):
             if commit:
                 cmd.append(commit)
 
-            subprocess.check_call(cmd)
+            self._run_git_remote_cmd(cmd, cwd=path, key=key)
             return True
         except:
             return False
@@ -114,16 +140,12 @@ class Scriptorium(BotPlugin):
         """Builds paper using a fairly rigid command order, to mitigate security concerns for running arbitrary code."""
         self.log.debug("Attempting to build paper in {0}".format(path))
         paper_path = os.path.join(path, 'paper.mmd')
-        tex_path = os.path.join(path, 'paper.tex')
+
         if not os.path.exists(paper_path):
             return None
 
-        try:
-            subprocess.check_output([os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'bin', 'make_paper.sh'), path], universal_newlines=True, cwd=path)
-            return os.path.join(path, 'paper.pdf')
-        except subprocess.CalledProcessError as e:
-          self.log.error("Paper making failed: {0}".format(e.output))
-          return False
+        subprocess.check_output([os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'bin', 'make_paper.sh'), path], universal_newlines=True, cwd=path)
+        return os.path.join(path, 'paper.pdf')
 
     @botcmd
     def paper_add(self, mess, args):
@@ -141,7 +163,7 @@ class Scriptorium(BotPlugin):
         if os.path.exists(paper_dir):
             return "{0} already exists in the papers folder, refusing to overwrite.".format(folder)
 
-        if self._clone_repo(args, papers_dir):
+        if self._clone_repo(args, papers_dir, user=mess.frm.username):
             return "Downloaded paper repository {0}".format(folder)
         else:
             return "Could not download specified paper repository."
@@ -151,10 +173,12 @@ class Scriptorium(BotPlugin):
         """Updates a paper to the specified version."""
         self._check_requirements()
 
-        template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'papers', args)
-        if not self._is_repo(template_dir):
+        paper_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'papers', args)
+        if not self._is_repo(paper_dir):
             return "{0} is not a valid paper.".format(args)
-        if self._update_repo(template_dir):
+        if not self._test_remote_access(paper_dir, mess.frm.username):
+            return "You do not have permissions to access this paper."
+        if self._update_repo(paper_dir, user=mess.frm.username):
             return "{0} has been updated to the latest version.".format(args)
 
     @botcmd
@@ -163,18 +187,20 @@ class Scriptorium(BotPlugin):
         self._check_requirements()
 
         paper_dir = os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'papers', args)
-        if self._is_repo(paper_dir):
-            yield "Attempting to make {0}".format(args)
+        if not self._is_repo(paper_dir):
+            return "I cannot find a paper named {0}.".format(args)
+        if not self._test_remote_access(paper_dir, mess.frm.username):
+            return "You do not have permissions to access this paper."
+
+        yield "Attempting to make {0}".format(args)
+        try:
             pdf_path = self._build_paper(paper_dir)
             if pdf_path:
-              # with open(pdf_path, 'rb') as fp:
-                  # file, contenttype = urllib3.filepost.encode_multipart_formdata({'file': ('paper.pdf', fp.read(), 'application/pdf')})
-              data = {'filename': 'paper.pdf', 'file': open(pdf_path, 'rb'), 'channels': mess.frm.channelid}
-              self._bot.api_call('files.upload', data)
-            else:
-              yield "Failed to make {0}".format(args)
-        else:
-            return "{0} is not a valid paper.".format(args)
+                data = {'filename': 'paper.pdf', 'file': open(pdf_path, 'rb'), 'channels': mess.frm.channelid}
+                self._bot.api_call('files.upload', data)
+        except subprocess.CalledProcessError as e:
+            yield "Failed to make {0}.".format(args)
+            self.send(self.build_identifier(mess.frm.username), e.output)
 
     @botcmd
     def template_add(self, mess, args):
@@ -191,7 +217,7 @@ class Scriptorium(BotPlugin):
         if os.path.exists(template_path):
             return "Refusing to overwrite template {0}".format(folder)
 
-        if self._clone_repo(args, templates_dir):
+        if self._clone_repo(args, templates_dir, user=mess.frm.username):
             return "Successfully installed template repository {0}".format(args)
         else:
             return "Failed to clone template repository {0}".format(args)
@@ -224,9 +250,36 @@ class Scriptorium(BotPlugin):
         template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates', args)
         if not self._is_repo(template_dir):
             return "{0} is not a valid template.".format(args)
-        if self._update_repo(template_dir):
+        if self._update_repo(template_dir, user=mess.frm.username):
             return "{0} has been updated to the latest version.".format(args)
 
+    @botcmd
+    def key_get(self, mess, args):
+        """Generates or returns an SSH public key for allowing the bot to access private repositories."""
+        users = self['users'] if 'users' in self else {}
+        if mess.frm.username not in users:
+            self.log.debug('Adding user {0}'.format(mess.frm.username))
+            users[mess.frm.username] = {'key': RSA.generate(2048)}
+        user_info = users[mess.frm.username]
+        if 'key' not in user_info:
+          user_info['key'] = RSA.generate(2048)
+          users[mess.frm.username] = user_info
+        self['users'] = users
+        ssh_pub_key = user_info['key'].publickey().exportKey('OpenSSH').decode("utf-8")
+        return "Your public key to grant me access to repositories is:\n{0}".format(ssh_pub_key)
+
+    @botcmd
+    def key_rm(self, mess, args):
+        """Removes the key for the user requesting the operation."""
+        users = self['users'] if 'users' in self else {}
+
+        if mess.frm.username not in users:
+            return "You do not appear to have an SSH key generated."
+        users[mess.frm.username].pop('key', None)
+
+        self['users'] = users
+
+        return "Keys deleted."
 
     def get_configuration_template(self):
         """Defines the configuration structure this plugin supports
