@@ -263,7 +263,7 @@ class Scriptorium(BotPlugin):
 
         templates_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates')
         templates = [ii for ii in os.listdir(templates_dir) if self._is_repo(os.path.join(templates_dir, ii))]
-        return "`# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates]) + '`'
+        return "```\n# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates]) + '\n```'
 
     @botcmd(template="template_info")
     def template_info(self, mess, args):
