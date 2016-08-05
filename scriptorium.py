@@ -217,6 +217,23 @@ class Scriptorium(BotPlugin):
             self.send(self.build_identifier(mess.frm.username), e.output)
 
     @botcmd
+
+    @botcmd
+    def paper_list(self, mess, args):
+        """List all papers which a user can interact with."""
+        self._check_requirements()
+
+        papers_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'papers')
+
+        papers = []
+        for ii in os.listdir(papers_dir):
+          paper_dir = os.path.join(papers_dir, ii)
+          if self._is_repo(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
+            papers.append(ii)
+
+        return "```\n# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers]) + '\n```'
+
+    @botcmd
     def template_add(self, mess, args):
         """Command to add a template to the Scriptorium setup."""
         self._check_requirements()
