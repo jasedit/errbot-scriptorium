@@ -69,12 +69,13 @@ class Scriptorium(BotPlugin):
         except:
           return False
 
-    def _run_git_remote_cmd(self, cmd, cwd=None, key=None):
+    def _run_git_remote_cmd(self, cmd, cwd=None, key=None, capture_stderr=False):
         """Executes a git command with an SSH key set."""
         path = self._write_key(key) if key else ''
         env = {'GIT_SSH_COMMAND': 'ssh -i {0}'.format(path)} if key else None
+        stderr = subprocess.STDOUT if capture_stderr else None
         try:
-            subprocess.check_output(cmd, cwd=cwd, env=env)
+            subprocess.check_output(cmd, cwd=cwd, env=env, stderr=stderr)
         except subprocess.CalledProcessError as e:
             raise e
         finally:
@@ -113,7 +114,7 @@ class Scriptorium(BotPlugin):
             self.log.debug("Cloning {0} to {1}".format(url, path))
             cmd = ['git', 'clone', url]
             key = self.get('users', {}).get(user, {}).get('key', None)
-            self._run_git_remote_cmd(cmd, cwd=path, key=key)
+            self._run_git_remote_cmd(cmd, cwd=path, key=key, capture_stderr=True)
             return True
         except subprocess.CalledProcessError as e:
           cmd_str = ' '.join(cmd)
