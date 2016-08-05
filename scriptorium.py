@@ -55,6 +55,20 @@ class Scriptorium(BotPlugin):
 
         return path
 
+    def _validate_remote(self, url):
+        """Checks the fingerprint of the remote host and stores it."""
+        value = subprocess.call(['ssh-keygen', '-F', url])
+        if value == 0:
+            return True
+        try:
+            key = subprocess.check_output(['ssh-keyscan', '-H', url], universal_newlines=True)
+            if key:
+              known_hosts = os.path.expanduser(os.path.join("~", ".ssh", "known_hosts"))
+              with open(known_hosts, 'a') as fd:
+                fd.write(key)
+        except:
+          return False
+
     def _run_git_remote_cmd(self, cmd, cwd=None, key=None):
         """Executes a git command with an SSH key set."""
         path = self._write_key(key) if key else ''
@@ -130,11 +144,9 @@ class Scriptorium(BotPlugin):
 
     def _parse_repo_url(self, path):
         """Parses a string, attempting to find a folder.git extension at the end."""
-        url_re = re.compile(r'.*\/(?P<dir>[^\/\.]*).git\/*')
+        url_re = re.compile(r'((git|ssh|http(s)?)(:(//)?)|([\w\d]*@))?(?P<url>[\w\.]+).*\/(?P<dir>[\w\-]+)(\.git)(/)?')
         match = url_re.search(path)
-        if match is not None:
-            return match.group('dir')
-        return None
+        return (match.group('url'), match.group('dir')) if match else (None, None)
 
     def _build_paper(self, path):
         """Builds paper using a fairly rigid command order, to mitigate security concerns for running arbitrary code."""
@@ -152,8 +164,10 @@ class Scriptorium(BotPlugin):
         """Adds a paper to the repository of papers."""
         self._check_requirements()
 
-        folder = self._parse_repo_url(args)
+        host, folder = self._parse_repo_url(args)
 
+        if host:
+            self._validate_remote(host)
         if folder is None:
             return "Cannot parse URL for repository folder name."
 
@@ -207,7 +221,10 @@ class Scriptorium(BotPlugin):
         """Command to add a template to the Scriptorium setup."""
         self._check_requirements()
 
-        folder = self._parse_repo_url(args)
+        host, folder = self._parse_repo_url(args)
+
+        if host:
+            self._validate_remote(host)
 
         if folder is None:
           return "Cannot parse URL for repository folder name."
