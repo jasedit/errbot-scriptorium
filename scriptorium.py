@@ -286,6 +286,9 @@ class Scriptorium(BotPlugin):
             return "{0} is not a valid template.".format(args)
         if self._update_repo(template_dir, user=mess.frm.username):
             return "{0} has been updated to the latest version.".format(args)
+        else:
+            return "Failed to update {0}".format(args)
+
 
     @botcmd
     def key_get(self, mess, args):
