@@ -6,6 +6,7 @@ from errbot import BotPlugin, botcmd
 from errbot import utils
 from errbot.templating import tenv
 from Crypto.PublicKey import RSA
+import shutil
 import tempfile
 import subprocess
 import os
@@ -217,6 +218,19 @@ class Scriptorium(BotPlugin):
             self.send(self.build_identifier(mess.frm.username), e.output)
 
     @botcmd
+    def paper_rm(self, mess, args):
+        """Deletes a paper from the system."""
+        self._check_requirements()
+
+        paper_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'papers', args)
+        if not self._is_repo(paper_dir):
+            return "{0} is not a valid paper.".format(args)
+        if not self._test_remote_access(paper_dir, mess.frm.username):
+            return "You do not have permissions to access this paper."
+
+        shutil.rmtree(paper_dir)
+
+        return "{0} has been removed from papers.".format(args)
 
     @botcmd
     def paper_list(self, mess, args):
@@ -289,6 +303,20 @@ class Scriptorium(BotPlugin):
         else:
             return "Failed to update {0}".format(args)
 
+    @botcmd
+    def template_rm(self, mess, args):
+        """Deletes a template from the system."""
+        self._check_requirements()
+
+        template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates', args)
+        if not self._is_repo(template_dir):
+            return "{0} is not a valid template.".format(args)
+        if not self._test_remote_access(template_dir, mess.frm.username):
+            return "You do not have permissions to access this template."
+
+        shutil.rmtree(template_dir)
+
+        return "{0} has been removed from templates.".format(args)
 
     @botcmd
     def key_get(self, mess, args):
