@@ -211,8 +211,9 @@ class Scriptorium(BotPlugin):
         try:
             pdf_path = self._build_paper(paper_dir)
             if pdf_path:
-                data = {'filename': 'paper.pdf', 'file': open(pdf_path, 'rb'), 'channels': mess.frm.channelid}
-                self._bot.api_call('files.upload', data)
+                self.log.debug('Paper built in {0}, sending to {1}'.format(paper_dir, mess.frm.channelid))
+                self.send_stream_request(mess.frm, open(pdf_path, 'rb'), name="paper.pdf", stream_type='application/pdf')
+                self.log.debug('Stream requested to send paper.')
         except subprocess.CalledProcessError as e:
             yield "Failed to make {0}.".format(args)
             self.send(self.build_identifier(mess.frm.username), e.output)
