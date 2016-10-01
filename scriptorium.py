@@ -11,38 +11,21 @@ import tempfile
 import subprocess
 import os
 import re
+from itertools import chain
+import scriptorium
+import pymmd
 
 CONFIG_TEMPLATE = {
-  'SCRIPTORIUM_LOCATION': os.path.join(os.environ['HOME'], 'scriptorium'),
-  'MMD': '/usr/local/bin/multimarkdown'
+  'SCRIPTORIUM_LOCATION': os.path.join(os.environ['HOME'], 'scriptorium')
 }
 
 class Scriptorium(BotPlugin):
-    REQUIRED_PACKAGES = ['multimarkdown', 'pdflatex', 'latexpand', 'biber']
     def _check_requirements(self):
         """Checks that the proper binaries and folders exist for operation."""
         if not os.path.isdir(self.config['SCRIPTORIUM_LOCATION']):
             raise RuntimeError("Scriptorium does not exist at {0}".format(self.config['SCRIPTORIUM_LOCATION']))
-
-        #Multimarkdown installs to /usr/local/bin by default, make sure it's in the path for this test
-        old_path = None
-        if os.environ['PATH'].find('/usr/local/bin') == -1:
-            old_path = os.environ['PATH']
-            os.environ['PATH'] = '/usr/local/bin:{0}'.format(old_path)
-
-        status = True
-        for ii in Scriptorium.REQUIRED_PACKAGES:
-            location = utils.which(ii)
-
-            if location is None:
-                self.log.error('Could not find executable {0}'.format(ii))
-                status = False
-
-        #If path was modified, reset it for minimal impact.
-        if old_path:
-            os.environ['PATH'] = old_path
-        if not status:
-            raise RuntimeError("Could not find required binaries.")
+        if not pymmd.valid_mmd():
+            raise RuntimeError('pymmd is not properly configured')
 
     def _is_repo(self, path):
       """Tests if a given path is a folder containing a git repository."""
@@ -50,7 +33,7 @@ class Scriptorium(BotPlugin):
 
     def _write_key(self, key):
         """Writes the key to a temporary file, returns path if successful."""
-        fd, path = tempfile.mkstemp()
+        _, path = tempfile.mkstemp()
         with open(fd, 'w') as fdkey:
             fdkey.write(key.exportKey('PEM').decode('ascii'))
 
@@ -88,7 +71,7 @@ class Scriptorium(BotPlugin):
             return ""
         try:
             return str(subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'], cwd=path, universal_newlines=True))
-        except:
+        except subprocess.CalledProcessError:
             return ""
 
     def _is_repo_clean(self, path):
@@ -98,7 +81,7 @@ class Scriptorium(BotPlugin):
         try:
             status = subprocess.check_output(['git', 'status', '--porcelain'], cwd=path)
             return bool(status)
-        except:
+        except subprocess.CalledProcessError:
             return False
 
     def _test_remote_access(self, path, user = None):
@@ -106,7 +89,7 @@ class Scriptorium(BotPlugin):
             key = self.get('users', {}).get(user, {}).get('key', None)
             self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
             return True
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             return False
 
     def _clone_repo(self, url, path, user = None):
@@ -149,16 +132,9 @@ class Scriptorium(BotPlugin):
         match = url_re.search(path)
         return (match.group('url'), match.group('dir')) if match else (None, None)
 
-    def _build_paper(self, path):
-        """Builds paper using a fairly rigid command order, to mitigate security concerns for running arbitrary code."""
-        self.log.debug("Attempting to build paper in {0}".format(path))
-        paper_path = os.path.join(path, 'paper.mmd')
-
-        if not os.path.exists(paper_path):
-            return None
-
-        subprocess.check_output([os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'bin', 'make_paper.sh'), path], universal_newlines=True, cwd=path)
-        return os.path.join(path, 'paper.pdf')
+    @botcmd
+    def validate(self, _, args):
+        return str(self._validate_remote(args))
 
     @botcmd
     def paper_add(self, mess, args):
@@ -209,7 +185,7 @@ class Scriptorium(BotPlugin):
 
         yield "Attempting to make {0}".format(args)
         try:
-            pdf_path = self._build_paper(paper_dir)
+            pdf_path = scriptorium.to_pdf(paper_dir, use_shell_escape=True)
             if pdf_path:
                 self.log.debug('Paper built in {0}, sending to {1}'.format(paper_dir, mess.frm.channelid))
                 self.send_stream_request(mess.frm, open(pdf_path, 'rb'), name="paper.pdf", stream_type='application/pdf')
@@ -230,8 +206,6 @@ class Scriptorium(BotPlugin):
             return "You do not have permissions to access this paper."
 
         shutil.rmtree(paper_dir)
-
-        return "{0} has been removed from papers.".format(args)
 
     @botcmd
     def paper_list(self, mess, args):
@@ -255,36 +229,27 @@ class Scriptorium(BotPlugin):
 
         host, folder = self._parse_repo_url(args)
 
-        if host:
-            self._validate_remote(host)
+        if not host:
+            return "Invalid host {0}".format(args)
+        if not self._validate_remote(host):
+            return "You do not appear to have permission to access {0}".format(args)
 
-        if folder is None:
-          return "Cannot parse URL for repository folder name."
-
-        templates_dir = os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'templates')
-        template_path = os.path.join(templates_dir, folder)
-        if os.path.exists(template_path):
-            return "Refusing to overwrite template {0}".format(folder)
-
-        if self._clone_repo(args, templates_dir, user=mess.frm.username):
-            return "Successfully installed template repository {0}".format(args)
-        else:
-            return "Failed to clone template repository {0}".format(args)
+        scriptorium.install_template(args)
 
     @botcmd
     def template_list(self, mess, args):
         """List all currently installed templates."""
         self._check_requirements()
 
-        templates_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates')
-        templates = [ii for ii in os.listdir(templates_dir) if self._is_repo(os.path.join(templates_dir, ii))]
+        templates = scriptorium.all_templates()
+
         return "```\n# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates]) + '\n```'
 
     @botcmd(template="template_info")
     def template_info(self, mess, args):
         """Get information about the status of the requested template."""
         self._check_requirements()
-        template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates', args)
+        template_dir = scriptorium.find_template(args)
         if not self._is_repo(template_dir):
           return {'name': args, 'branch': "None", 'status': 'Not installed'}
 
@@ -296,28 +261,11 @@ class Scriptorium(BotPlugin):
         """Updates the template to the latest version."""
         self._check_requirements()
 
-        template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates', args)
-        if not self._is_repo(template_dir):
+        template_dir = scriptorium.find_template(args)
+        if not template_dir or not self._is_repo(template_dir):
             return "{0} is not a valid template.".format(args)
         if self._update_repo(template_dir, user=mess.frm.username):
             return "{0} has been updated to the latest version.".format(args)
-        else:
-            return "Failed to update {0}".format(args)
-
-    @botcmd
-    def template_rm(self, mess, args):
-        """Deletes a template from the system."""
-        self._check_requirements()
-
-        template_dir = os.path.join(self.config["SCRIPTORIUM_LOCATION"], 'templates', args)
-        if not self._is_repo(template_dir):
-            return "{0} is not a valid template.".format(args)
-        if not self._test_remote_access(template_dir, mess.frm.username):
-            return "You do not have permissions to access this template."
-
-        shutil.rmtree(template_dir)
-
-        return "{0} has been removed from templates.".format(args)
 
     @botcmd
     def key_get(self, mess, args):
