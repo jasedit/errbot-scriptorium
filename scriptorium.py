@@ -34,7 +34,7 @@ class Scriptorium(BotPlugin):
     def _write_key(self, key):
         """Writes the key to a temporary file, returns path if successful."""
         _, path = tempfile.mkstemp()
-        with open(fd, 'w') as fdkey:
+        with open(path, 'w') as fdkey:
             fdkey.write(key.exportKey('PEM').decode('ascii'))
 
         return path
