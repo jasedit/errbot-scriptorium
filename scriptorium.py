@@ -87,7 +87,7 @@ class Scriptorium(BotPlugin):
         except subprocess.CalledProcessError:
             return False
 
-    def _test_remote_access(self, path, user = None):
+    def _test_remote_access(self, path, user=None):
         try:
             key = self.get('users', {}).get(user, {}).get('key', None)
             self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
@@ -95,7 +95,7 @@ class Scriptorium(BotPlugin):
         except subprocess.CalledProcessError:
             return False
 
-    def _clone_repo(self, url, path, user = None):
+    def _clone_repo(self, url, path, user=None):
         """Clones a git repository from the url to a folder inside the path given."""
         try:
             self.log.debug("Cloning {0} to {1}".format(url, path))
@@ -104,9 +104,9 @@ class Scriptorium(BotPlugin):
             self._run_git_remote_cmd(cmd, cwd=path, key=key, capture_stderr=True)
             return True
         except subprocess.CalledProcessError as e:
-          cmd_str = ' '.join(cmd)
-          self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
-          return False
+            cmd_str = ' '.join(cmd)
+            self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
+            return False
 
     def _update_repo(self, path, force=False, commit=None, user=None):
         """Updates a repository to a particular version, or the latest version if commit is None."""
