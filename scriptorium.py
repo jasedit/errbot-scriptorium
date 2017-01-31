@@ -206,6 +206,7 @@ class Scriptorium(BotPlugin):
             return "You do not have permissions to access this paper."
 
         shutil.rmtree(paper_dir)
+        return "Paper successfully removed"
 
     @botcmd
     def paper_list(self, mess, args):
