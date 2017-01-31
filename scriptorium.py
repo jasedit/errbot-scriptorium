@@ -29,7 +29,10 @@ class Scriptorium(BotPlugin):
 
     def _is_repo(self, path):
       """Tests if a given path is a folder containing a git repository."""
-      return os.path.isdir(path) and os.path.isdir(os.path.join(path, '.git'))
+      if not os.path.exists(path):
+        return False
+      dpath = os.path.dirname(path)
+      return subprocess.call(['git', 'rev-parse'], cwd=dpath) == 0
 
     def _write_key(self, key):
         """Writes the key to a temporary file, returns path if successful."""
