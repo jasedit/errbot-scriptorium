@@ -221,7 +221,8 @@ class Scriptorium(BotPlugin):
         papers = []
         for ii in os.listdir(papers_dir):
           paper_dir = os.path.join(papers_dir, ii)
-          if self._is_repo(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
+          yield paper_dir
+          if self._is_repo(paper_dir) and os.path.isdir(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
             papers.append(ii)
 
         return "```\n# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers]) + '\n```'
