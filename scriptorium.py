@@ -225,7 +225,7 @@ class Scriptorium(BotPlugin):
           if self._is_repo(paper_dir) and os.path.isdir(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
             papers.append(ii)
 
-        return "```\n# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers]) + '\n```'
+        return "# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers])
 
     @botcmd
     def template_add(self, mess, args):
@@ -248,7 +248,7 @@ class Scriptorium(BotPlugin):
 
         templates = scriptorium.all_templates()
 
-        return "```\n# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates]) + '\n```'
+        return "# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates])
 
     @botcmd(template="template_info")
     def template_info(self, mess, args):
