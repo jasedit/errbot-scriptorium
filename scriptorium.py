@@ -87,7 +87,7 @@ class Scriptorium(BotPlugin):
         except subprocess.CalledProcessError:
             return False
 
-    def _test_remote_access(self, path, user = None):
+    def _test_remote_access(self, path, user=None):
         try:
             key = self.get('users', {}).get(user, {}).get('key', None)
             self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
@@ -95,7 +95,7 @@ class Scriptorium(BotPlugin):
         except subprocess.CalledProcessError:
             return False
 
-    def _clone_repo(self, url, path, user = None):
+    def _clone_repo(self, url, path, user=None):
         """Clones a git repository from the url to a folder inside the path given."""
         try:
             self.log.debug("Cloning {0} to {1}".format(url, path))
@@ -104,9 +104,9 @@ class Scriptorium(BotPlugin):
             self._run_git_remote_cmd(cmd, cwd=path, key=key, capture_stderr=True)
             return True
         except subprocess.CalledProcessError as e:
-          cmd_str = ' '.join(cmd)
-          self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
-          return False
+            cmd_str = ' '.join(cmd)
+            self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
+            return False
 
     def _update_repo(self, path, force=False, commit=None, user=None):
         """Updates a repository to a particular version, or the latest version if commit is None."""
@@ -221,10 +221,11 @@ class Scriptorium(BotPlugin):
         papers = []
         for ii in os.listdir(papers_dir):
           paper_dir = os.path.join(papers_dir, ii)
-          if self._is_repo(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
+          yield paper_dir
+          if self._is_repo(paper_dir) and os.path.isdir(paper_dir) and self._test_remote_access(paper_dir, mess.frm.username):
             papers.append(ii)
 
-        return "```\n# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers]) + '\n```'
+        return "# Installed Paper Repos\n" + '\n'.join(["* {0}".format(ii) for ii in papers])
 
     @botcmd
     def template_add(self, mess, args):
@@ -247,7 +248,7 @@ class Scriptorium(BotPlugin):
 
         templates = scriptorium.all_templates()
 
-        return "```\n# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates]) + '\n```'
+        return "# Installed Templates\n" + '\n'.join(["* {0}".format(ii) for ii in templates])
 
     @botcmd(template="template_info")
     def template_info(self, mess, args):
