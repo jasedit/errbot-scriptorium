@@ -22,10 +22,15 @@ CONFIG_TEMPLATE = {
 class Scriptorium(BotPlugin):
     def _check_requirements(self):
         """Checks that the proper binaries and folders exist for operation."""
+        #Make directory if it doesn't exist yet
+        if not os.path.isdir(self.config['SCRIPTORIUM_LOCATION']):
+            os.mkdir(self.config['SCRIPTORIUM_LOCATION'])
+        #Must exist by this point
         if not os.path.isdir(self.config['SCRIPTORIUM_LOCATION']):
             raise RuntimeError("Scriptorium does not exist at {0}".format(self.config['SCRIPTORIUM_LOCATION']))
+
         if not pymmd.valid_mmd():
-            raise RuntimeError('pymmd is not properly configured')
+            raise RuntimeError('pymmd cannot load libMultiMarkdown')
 
     def _is_repo(self, path):
       """Tests if a given path is a folder containing a git repository."""
