@@ -131,6 +131,8 @@ class Scriptorium(BotPlugin):
                 cmd.append(commit)
 
             self._run_git_remote_cmd(cmd, cwd=path, key=key)
+            if not commit:
+                self._run_git_remote_cmd(['git', 'update'], cwd=path, key=key)
             return True
         except:
             return False
