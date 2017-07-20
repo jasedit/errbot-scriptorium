@@ -68,11 +68,12 @@ class Scriptorium(BotPlugin):
         stderr = subprocess.STDOUT if capture_stderr else None
         try:
             subprocess.check_output(cmd, cwd=cwd, env=env, stderr=stderr)
-        except subprocess.CalledProcessError as e:
-            raise e
+        except subprocess.CalledProcessError as ex:
+            raise ex
         finally:
             if path:
                 os.remove(path)
+        return True
 
     def _get_branch_name(self, path):
         if not self._is_repo(path):
