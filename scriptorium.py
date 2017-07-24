@@ -12,12 +12,17 @@ import subprocess
 import os
 import re
 from itertools import chain
+from contextlib import contextmanager
 import scriptorium
 import pymmd
+import pygit2
 
 CONFIG_TEMPLATE = {
   'SCRIPTORIUM_LOCATION': os.path.join(os.environ['HOME'], 'scriptorium')
 }
+
+def _is_repo_clean(repo):
+    return len(repo.status()) == 0 if repo else False
 
 class Scriptorium(BotPlugin):
     def _check_requirements(self):
@@ -27,20 +32,39 @@ class Scriptorium(BotPlugin):
         if not pymmd.valid_mmd():
             raise RuntimeError('pymmd is not properly configured')
 
-    def _is_repo(self, path):
-      """Tests if a given path is a folder containing a git repository."""
-      if not os.path.exists(path):
-        return False
-      dpath = os.path.dirname(path)
-      return subprocess.call(['git', 'rev-parse'], cwd=dpath) == 0
+    @contextmanager
+    def _credentials(self, user):
+        key = self.get('users', {}).get(user, {}).get('key', None)
+        cred = None
+        if key is not None:
+            priv_key, pub_key, path = self._write_keys(key)
+            cred = pygit2.Keypair(user, pub_key, priv_key, '')
+        mycb = pygit2.RemoteCallbacks()
+        if cred:
+            mycb.credentials = cred
+        yield mycb
+        shutil.rmtree(path)
 
-    def _write_key(self, key):
+    @contextmanager
+    def _remote(self, repo, remote_name='origin', user=os.getlogin()):
+        for remote in repo.remotes:
+            if remote.name != remote_name:
+                continue
+            with self._credentials(user) as cred:
+                yield remote, mycb
+            break
+
+    def _write_keys(self, key):
         """Writes the key to a temporary file, returns path if successful."""
-        _, path = tempfile.mkstemp()
-        with open(path, 'w') as fdkey:
+        path = tempfile.mkdtemp()
+        priv_key = os.path.join(path, 'id_rsa')
+        pub_key = os.path.join(path, 'ida_rsa.pub')
+        with open(priv_key, 'w') as fdkey:
             fdkey.write(key.exportKey('PEM').decode('ascii'))
+        with open(pub_key, 'w') as fdkey:
+            fdkey.write(key.publickey().exportKey('PEM').decode('ascii'))
 
-        return path
+        return priv_key, pub_key, path
 
     def _validate_remote(self, url):
         """Checks the fingerprint of the remote host and stores it."""
@@ -53,87 +77,60 @@ class Scriptorium(BotPlugin):
               known_hosts = os.path.expanduser(os.path.join("~", ".ssh", "known_hosts"))
               with open(known_hosts, 'a') as fd:
                 fd.write(key)
+            return True
         except:
           return False
 
-    def _run_git_remote_cmd(self, cmd, cwd=None, key=None, capture_stderr=False):
-        """Executes a git command with an SSH key set."""
-        path = self._write_key(key) if key else ''
-        env = {'GIT_SSH_COMMAND': 'ssh -i {0}'.format(path)} if key else None
-        stderr = subprocess.STDOUT if capture_stderr else None
-        try:
-            subprocess.check_output(cmd, cwd=cwd, env=env, stderr=stderr)
-        except subprocess.CalledProcessError as e:
-            raise e
-        finally:
-            if path:
-                os.remove(path)
-
     def _get_branch_name(self, path):
-        if not self._is_repo(path):
-            return ""
-        try:
-            return str(subprocess.check_output(['git', 'symbolic-ref', '--short', 'HEAD'], cwd=path, universal_newlines=True))
-        except subprocess.CalledProcessError:
-            return ""
+        repo = pygit2.Repository(path)
+        return repo.head.shorthand if repo else None
 
-    def _is_repo_clean(self, path):
-        if not self._is_repo(path):
+    def _test_remote_access(self, path, user=os.getlogin(), remote_name='origin'):
+        try:
+            repo = pygit2.Repository(path)
+            with self._remote(repo, user=user) as remote, callbacks:
+                remote.fetch(callbacks=callbacks)
+                return True
+        except pygit2.GitError as exc:
             return False
 
-        try:
-            status = subprocess.check_output(['git', 'status', '--porcelain'], cwd=path)
-            return bool(status)
-        except subprocess.CalledProcessError:
-            return False
-
-    def _test_remote_access(self, path, user=None):
-        try:
-            key = self.get('users', {}).get(user, {}).get('key', None)
-            self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
-            return True
-        except subprocess.CalledProcessError:
-            return False
-
-    def _clone_repo(self, url, path, user=None):
+    def _clone_repo(self, url, path, user=os.getlogin()):
         """Clones a git repository from the url to a folder inside the path given."""
         try:
             self.log.debug("Cloning {0} to {1}".format(url, path))
-            cmd = ['git', 'clone', url]
-            key = self.get('users', {}).get(user, {}).get('key', None)
-            self._run_git_remote_cmd(cmd, cwd=path, key=key, capture_stderr=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            cmd_str = ' '.join(cmd)
-            self.log.error("git clone command \"{0}\" failed: {1}".format(cmd_str, e.output))
-            return False
+            with self._credentials(user) as cred:
+                if cred:
+                    pygit2.clone_repository(url, path, callbacks=cred)
 
-    def _update_repo(self, path, force=False, commit=None, user=None):
+    def _update_repo(self, repo, force=False, remote_name='origin', user=os.getlogin()):
         """Updates a repository to a particular version, or the latest version if commit is None."""
 
-        if not self._is_repo(path):
-            return False
-
-        key = self.get('users', {}).get(user, {}).get('key', None)
-        try:
-            self._run_git_remote_cmd(['git', 'fetch'], cwd=path, key=key)
-            cmd = ['git', 'checkout']
-
-            if force:
-                cmd.append('--force')
-            if commit:
-                cmd.append(commit)
-
-            self._run_git_remote_cmd(cmd, cwd=path, key=key)
-            return True
-        except:
-            return False
+        with self._remote(repo, remote_name, user) as remote, callbacks:
+            remote.fetch(callbacks=callbacks)
+            bname = repo.head.shorthand
+            remote_refname = 'refs/remotes/{0}/{1}'.format(remote_name, bname)
+            remote_master_id = repo.lookup_reference(remote_refname).target
+            merge_result, _ = repo.merge_analysis(remote_master_id)
+            if merge_result & pygit2.GIT_MERGE_ANALYSIS_FASTFORWARD:
+                repo.checkout_tree(repo.get(remote_master_id))
+                master_ref = repo.lookup_reference('refs/head/{0}'.format(bname))
+                master_ref.set_target(remote_master_id)
+                repo.head.set_target(remote_master_id)
+            elif merge_result & pygit2.MERGE_ANALYSIS_NORMAL and force:
+                repo.checkout_tree(remote_master_id, strategy=pygit2.GIT_CHECKOUT_FORCE)
 
     def _parse_repo_url(self, path):
         """Parses a string, attempting to find a folder.git extension at the end."""
-        url_re = re.compile(r'((git|ssh|http(s)?)(:(//)?)|([\w\d]*@))?(?P<url>[\w\.]+).*\/(?P<dir>[\w\-]+)(\.git)(/)?')
+        url_re = re.compile(r'((git|ssh|http(s)?)(:(//)?)|(?P<user>[\w\d]*)@)?(?P<url>[\w\.]+).*\/(?P<dir>[\w\-]+)(\.git)(/)?')
         match = url_re.search(path)
-        return (match.group('url'), match.group('dir')) if match else (None, None)
+        if not match:
+            return None
+
+        user = match.group('user') if match.group('user') else os.getlogin()
+
+        return {'url' : match.group('url'),
+                    'dir': match.group('dir'),
+                    'user': user}
 
     @botcmd
     def validate(self, _, args):
@@ -144,12 +141,13 @@ class Scriptorium(BotPlugin):
         """Adds a paper to the repository of papers."""
         self._check_requirements()
 
-        host, folder = self._parse_repo_url(args)
+        remote_info = self._parse_repo_url(args)
+
+        if not remote_info:
+            return "Cannot parse URL for repository info."
 
         if host:
-            self._validate_remote(host)
-        if folder is None:
-            return "Cannot parse URL for repository folder name."
+            self._validate_remote(remote_info['url'])
 
         papers_dir = os.path.join(self.config['SCRIPTORIUM_LOCATION'], 'papers')
         paper_dir = os.path.join(papers_dir, folder)
@@ -254,11 +252,11 @@ class Scriptorium(BotPlugin):
         """Get information about the status of the requested template."""
         self._check_requirements()
         template_dir = scriptorium.find_template(args)
-        if not self._is_repo(template_dir):
-          return {'name': args, 'branch': "None", 'status': 'Not installed'}
-
-        status = 'clean' if self._is_repo_clean(template_dir) else 'dirty'
-        return {'name': args, 'branch': self._get_branch_name(template_dir), 'status': status}
+        with self._repo(template_dir, user=mess.frm.username) as repo:
+            if not repo:
+                return {'name': args, 'branch': "None", 'status': 'Not installed'}
+            status = 'clean' if _is_repo_clean(repo) else 'dirty'
+            return {'name': args, 'branch': repo.head.shorthand, 'status': status}
 
     @botcmd
     def template_update(self, mess, args):
